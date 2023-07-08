@@ -31,7 +31,8 @@ var uniqueId = random.UniqueId()
 // Default to my private subnet but allow one to be passed in for other VPCs
 var privateSubnetId = flag.String("privateSubnetId", "subnet-0cdaf467e3b2e0ea6", "Private Subnet ID to deploy to")
 var backendBucket = flag.String("backendBucket", "cb-infra-states", "Backend S3 bucket to store teststate")
-var backendKey = flag.String("backetKey", fmt.Sprintf("%s-terraform.tfstate", uniqueId), "Key for test state location")
+var backendBucketKey = flag.String("backendBucketKey", fmt.Sprintf("test-states/%s-terraform.tfstate", uniqueId), "Key for test state location")
+var backendBucketRegion = flag.String("backendBucketRegion", "eu-west-1", "The S3 Bucket region")
 
 func TestNginxInstance(t *testing.T) {
 	t.Parallel()
@@ -66,9 +67,9 @@ func TestNginxInstance(t *testing.T) {
 	// })
 
 	// Validate on the instance having the correct IAM profile
-	test_structure.RunTestStage(t, "validate_on_correct_IAM_profile", func() {
-		validateInstanceIAMProfile(t, workingDir)
-	})
+	// test_structure.RunTestStage(t, "validate_on_correct_IAM_profile", func() {
+	// 	validateInstanceIAMProfile(t, workingDir)
+	// })
 }
 
 func deployUsingTerraform(t *testing.T, testRegion string, workingDir string) {
@@ -86,9 +87,10 @@ func deployUsingTerraform(t *testing.T, testRegion string, workingDir string) {
 		},
 		BackendConfig: map[string]interface{}{
 			"bucket": *backendBucket,
-			"key":    *backendKey,
-			"region": testRegion,
+			"key":    *backendBucketKey,
+			"region": *backendBucketRegion,
 		},
+		Reconfigure: true,
 	})
 
 	// Save Terraform options so other test stages can re-use them.
@@ -150,9 +152,29 @@ func validateInstanceUsesPrivateIP(t *testing.T, workingDir string) {
 	assert.NotEmpty(t, instanceResponseData.PrivateIpAddress)
 }
 
-func validateInstanceIAMProfile(t *testing.T, workingDir string) {
+// func validateInstanceIAMProfile(t *testing.T, workingDir string) {
+// 	// Load the same options used in the deploy stage
+// 	terraformOptions := test_structure.LoadTerraformOptions(t, workingDir)
 
-}
+// 	// Fetch the target instanceID using `terraform output`
+// 	instanceId := terraform.Output(t, terraformOptions, "instance_id")
+
+// 	params := &ec2.DescribeInstancesInput{
+// 		Filters: []*ec2.Filter{
+// 			{
+// 				Name:   aws.String("instance-id"),
+// 				Values: []*string{aws.String(instanceId)},
+// 			},
+// 		},
+// 	}
+
+// 	// Error if the SDK can't return results
+// 	resp, err := ec2svc.DescribeInstances(params)
+// 	if err != nil {
+// 		fmt.Println("there was an error listing instances in", err.Error())
+// 		log.Fatal(err.Error())
+// 	}
+// }
 
 func undeployUsingTerraform(t *testing.T, workingDir string) {
 	// Load the same options used in the deploy stage

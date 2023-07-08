@@ -40,7 +40,7 @@ terrraform apply terraform.plan
 ## Tests
 The tests assert on each requirement listed above. Replace the subnet-id with your current target subnet.
 ```
-go test -v -privateSubnetId 'subnet-0cdaf467e3b2e0ea6'
+go test -v -privateSubnetId 'YourSubnetID' -backendBucket 'YourS3Bucket' -backendKey 'YourS3BucketKey' -backendBucketRegion 'YourS3BucketRegion'
 ```
 
 ## Issues
