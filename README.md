@@ -13,6 +13,6 @@ deploys an AWS EC2 instance with a LoadBalancer (ELB) running nginx on port 80
 
 
 ## Requirements
-This has been tested on a windows amd64 machine but should work on any OS.
+This has been tested on a windows amd64 machine but should work on any OS as long as the correct binaries are installed.
 * go1.20.5 windows/amd64
 * Terraform v1.5.1 windows/amd64
