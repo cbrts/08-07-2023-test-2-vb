@@ -14,7 +14,7 @@ A terraform module for a take home interview task.
 ## Assumptions
 * The Terraform code assumes that you already have a suitable VPC and subnets set up to deploy your instance in.
 * The Terratest code assumes that the default region will be eu-west-1, usually test resources should be region agnostic but as this has been developed in my personal AWS account, I'm sticking to a single region.
-* Terraform state is handeld by the user. For this example it's just going to write state locally.
+* Terraform state is handeld by the user. For this example it's assuming you have an s3 bucket already prepared.
 * SSM sessions have been enabled even though it's not in scope. This was to aid in debugging any issues with nginx.
 
 ## Requirements
@@ -23,10 +23,17 @@ This has been tested on a windows amd64 machine but should work on any OS as lon
 * Terraform v1.5.1 windows/amd64
 
 ## Running the example
-Replace the subnet-id with your current target subnet. If you want Terraform to prompt you for values, remove both the -var flags.
+If you want Terraform to prompt you for values, remove both the -var flags.
 ```
 cd examples/ec2_nginx
-terraform plan -out terraform.plan -var 'private_subnet_id=subnet-0cdaf467e3b2e0ea6' -var 'instance_type="t3.micro"'
+
+terraform init -backend-config="bucket='YourS3Bucket'" \
+-backend-config="key='YourS3BucketKey" \
+-backend-config="region='YourS3BucketRegion"
+
+terraform plan -out terraform.plan -var "private_subnet_id='YourSubnetID'" \
+-var "instance_type='YourInstanceType'"
+
 terrraform apply terraform.plan
 ```
 

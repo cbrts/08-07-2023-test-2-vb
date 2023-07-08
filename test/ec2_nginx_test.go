@@ -14,6 +14,7 @@ import (
 
 	// grunt_aws "github.com/gruntwork-io/terratest/modules/aws"
 	http_helper "github.com/gruntwork-io/terratest/modules/http-helper"
+	"github.com/gruntwork-io/terratest/modules/random"
 	"github.com/gruntwork-io/terratest/modules/terraform"
 	test_structure "github.com/gruntwork-io/terratest/modules/test-structure"
 	"github.com/stretchr/testify/assert"
@@ -24,8 +25,13 @@ var ec2svc = ec2.New(session.New(&aws.Config{
 	Region: aws.String("eu-west-1"),
 }))
 
+// Generate a unique ID for the state file
+var uniqueId = random.UniqueId()
+
 // Default to my private subnet but allow one to be passed in for other VPCs
 var privateSubnetId = flag.String("privateSubnetId", "subnet-0cdaf467e3b2e0ea6", "Private Subnet ID to deploy to")
+var backendBucket = flag.String("backendBucket", "cb-infra-states", "Backend S3 bucket to store teststate")
+var backendKey = flag.String("backetKey", fmt.Sprintf("%s-terraform.tfstate", uniqueId), "Key for test state location")
 
 func TestNginxInstance(t *testing.T) {
 	t.Parallel()
@@ -77,6 +83,11 @@ func deployUsingTerraform(t *testing.T, testRegion string, workingDir string) {
 		Vars: map[string]interface{}{
 			"instance_type":     testInstanceType,
 			"private_subnet_id": *privateSubnetId,
+		},
+		BackendConfig: map[string]interface{}{
+			"bucket": *backendBucket,
+			"key":    *backendKey,
+			"region": testRegion,
 		},
 	})
 
