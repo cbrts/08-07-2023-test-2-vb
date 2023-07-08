@@ -2,16 +2,29 @@ package test
 
 import (
 	"crypto/tls"
+	"flag"
 	"fmt"
+	"log"
 	"testing"
 	"time"
 
-	"github.com/gruntwork-io/terratest/modules/aws"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/ec2"
+	grunt_aws "github.com/gruntwork-io/terratest/modules/aws"
 	http_helper "github.com/gruntwork-io/terratest/modules/http-helper"
-	"github.com/gruntwork-io/terratest/modules/random"
 	"github.com/gruntwork-io/terratest/modules/terraform"
 	test_structure "github.com/gruntwork-io/terratest/modules/test-structure"
+	"github.com/stretchr/testify/assert"
 )
+
+// Create an EC2 client
+var ec2svc = ec2.New(session.New(&aws.Config{
+	Region: aws.String("eu-west-1"),
+}))
+
+// Default to my private subnet but allow one to be passed in for other accounts
+var privateSubnetId = flag.String("privateSubnetId", "subnet-0cdaf467e3b2e0ea6", "Private Subnet ID to deploy to")
 
 func TestNginxInstance(t *testing.T) {
 	t.Parallel()
@@ -30,30 +43,38 @@ func TestNginxInstance(t *testing.T) {
 		deployUsingTerraform(t, testRegion, workingDir)
 	})
 
-	// Assert on the test fixture
-	test_structure.RunTestStage(t, "validate_terraform", func() {
+	// Validate on the instance having only a private IP
+	test_structure.RunTestStage(t, "validate_on_private_ip", func() {
+		validateInstanceUsesPrivateIP(t, testRegion, workingDir)
+	})
+
+	// Validate on nginx being reachable and returning a 200
+	test_structure.RunTestStage(t, "validate_on_nginx_returning_200", func() {
 		validateInstanceRunningNginx(t, workingDir)
 	})
+
+	// Validate on the instance only allowing port 80
+	// test_structure.RunTestStage(t, "validate_on_ingress_80_only", func() {
+	// 	validateInstanceIngressRules(t, workingDir)
+	// })
+
+	// Validate on the instance having the correct IAM profile
+	// test_structure.RunTestStage(t, "validate_on_correct_IAM_profile", func() {
+	// 	validateInstanceIAMProfile(t, workingDir)
+	// })
 }
 
 func deployUsingTerraform(t *testing.T, testRegion string, workingDir string) {
-	// Generate a unique id to we don't have naming clashes
-	uniqueId := random.UniqueId()
-
-	// Set the instance name based on the tagging standard and unique ID
-	testInstanceName := fmt.Sprintf("terratest-ec2-ew1-1a-dev-nginx-%s", uniqueId)
-
 	// Get recommended instance type based on test region
-	testInstanceType := aws.GetRecommendedInstanceType(t, testRegion, []string{"t2.micro, t3.micro", "t2.small", "t3.small"})
+	testInstanceType := grunt_aws.GetRecommendedInstanceType(t, testRegion, []string{"t2.micro, t3.micro, t2.small, t3.small"})
 
 	// Set the Terraform directory to init as well as variables to pass in for the test.
 	terraformOptions := terraform.WithDefaultRetryableErrors(t, &terraform.Options{
 		TerraformDir: workingDir,
 
 		Vars: map[string]interface{}{
-			"aws_region":    testRegion,
-			"instance_name": testInstanceName,
-			"instance_type": testInstanceType,
+			"instance_type":     testInstanceType,
+			"private_subnet_id": *privateSubnetId,
 		},
 	})
 
@@ -69,7 +90,7 @@ func validateInstanceRunningNginx(t *testing.T, workingDir string) {
 	terraformOptions := test_structure.LoadTerraformOptions(t, workingDir)
 
 	// Fetch the generated DNS record from the ALB using `terraform output`
-	loadbalancerDNSRecord := terraform.Output(t, terraformOptions, "loadbalancer_dns_record")
+	loadbalancerDNSRecord := terraform.Output(t, terraformOptions, "hello_world")
 
 	// Set the URL to verify against using the DNS record above
 	instanceUrl := fmt.Sprintf("https://%s", loadbalancerDNSRecord)
@@ -83,6 +104,37 @@ func validateInstanceRunningNginx(t *testing.T, workingDir string) {
 
 	// Verify that we get a 200 when a response is sent
 	http_helper.HttpGetWithRetry(t, instanceUrl, &tlsConfig, 200, "", retryLimit, sleepBetweenRetry)
+}
+
+func validateInstanceUsesPrivateIP(t *testing.T, testRegion string, workingDir string) {
+	// Load the same options used in the deploy stage
+	terraformOptions := test_structure.LoadTerraformOptions(t, workingDir)
+
+	// Fetch the target instanceID using `terraform output`
+	instanceId := terraform.Output(t, terraformOptions, "instance_id")
+
+	// Fetch the privateIP to assert on from the SDK
+	params := &ec2.DescribeInstancesInput{
+		Filters: []*ec2.Filter{
+			{
+				Name:   aws.String("instance-id"),
+				Values: []*string{aws.String(instanceId)},
+			},
+		},
+	}
+
+	// Error if the SDK can't return results
+	resp, err := ec2svc.DescribeInstances(params)
+	if err != nil {
+		fmt.Println("there was an error listing instances in", err.Error())
+		log.Fatal(err.Error())
+	}
+
+	// Grab the NetworkInterface data for the instance
+	instanceResponseData := *resp.Reservations[0].Instances[0].NetworkInterfaces[0]
+
+	// Assert on a private IP being associated to the instance
+	assert.NotEmpty(t, instanceResponseData.PrivateIpAddress)
 }
 
 func undeployUsingTerraform(t *testing.T, workingDir string) {

@@ -33,6 +33,6 @@ resource "aws_instance" "this" {
     {
       "Name" = local.formatted_instance_name
     },
-      module.tags.tags
+    module.tags.tags
   )
 }
