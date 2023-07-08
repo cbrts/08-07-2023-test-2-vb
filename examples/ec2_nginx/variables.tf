@@ -2,7 +2,6 @@
 variable "instance_type" {
   description = "Type of instance to deploy"
   type        = string
-  default     = "t3.micro"
 }
 
 variable "private_subnet_id" {

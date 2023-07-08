@@ -32,4 +32,5 @@ resource "aws_instance" "this" {
     },
     module.tags.tags
   )
+  user_data = file("${path.module}/files/user_data.sh")
 }

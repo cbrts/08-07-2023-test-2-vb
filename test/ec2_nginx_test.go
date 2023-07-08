@@ -11,7 +11,8 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	grunt_aws "github.com/gruntwork-io/terratest/modules/aws"
+
+	// grunt_aws "github.com/gruntwork-io/terratest/modules/aws"
 	http_helper "github.com/gruntwork-io/terratest/modules/http-helper"
 	"github.com/gruntwork-io/terratest/modules/terraform"
 	test_structure "github.com/gruntwork-io/terratest/modules/test-structure"
@@ -23,7 +24,7 @@ var ec2svc = ec2.New(session.New(&aws.Config{
 	Region: aws.String("eu-west-1"),
 }))
 
-// Default to my private subnet but allow one to be passed in for other accounts
+// Default to my private subnet but allow one to be passed in for other VPCs
 var privateSubnetId = flag.String("privateSubnetId", "subnet-0cdaf467e3b2e0ea6", "Private Subnet ID to deploy to")
 
 func TestNginxInstance(t *testing.T) {
@@ -45,7 +46,7 @@ func TestNginxInstance(t *testing.T) {
 
 	// Validate on the instance having only a private IP
 	test_structure.RunTestStage(t, "validate_on_private_ip", func() {
-		validateInstanceUsesPrivateIP(t, testRegion, workingDir)
+		validateInstanceUsesPrivateIP(t, workingDir)
 	})
 
 	// Validate on nginx being reachable and returning a 200
@@ -59,14 +60,15 @@ func TestNginxInstance(t *testing.T) {
 	// })
 
 	// Validate on the instance having the correct IAM profile
-	// test_structure.RunTestStage(t, "validate_on_correct_IAM_profile", func() {
-	// 	validateInstanceIAMProfile(t, workingDir)
-	// })
+	test_structure.RunTestStage(t, "validate_on_correct_IAM_profile", func() {
+		validateInstanceIAMProfile(t, workingDir)
+	})
 }
 
 func deployUsingTerraform(t *testing.T, testRegion string, workingDir string) {
 	// Get recommended instance type based on test region
-	testInstanceType := grunt_aws.GetRecommendedInstanceType(t, testRegion, []string{"t2.micro, t3.micro, t2.small, t3.small"})
+	// testInstanceType := grunt_aws.GetRecommendedInstanceType(t, testRegion, []string{"t2.micro, t3.micro, t2.small, t3.small"})
+	testInstanceType := "t3.micro"
 
 	// Set the Terraform directory to init as well as variables to pass in for the test.
 	terraformOptions := terraform.WithDefaultRetryableErrors(t, &terraform.Options{
@@ -106,7 +108,7 @@ func validateInstanceRunningNginx(t *testing.T, workingDir string) {
 	http_helper.HttpGetWithRetry(t, instanceUrl, &tlsConfig, 200, "", retryLimit, sleepBetweenRetry)
 }
 
-func validateInstanceUsesPrivateIP(t *testing.T, testRegion string, workingDir string) {
+func validateInstanceUsesPrivateIP(t *testing.T, workingDir string) {
 	// Load the same options used in the deploy stage
 	terraformOptions := test_structure.LoadTerraformOptions(t, workingDir)
 
@@ -135,6 +137,10 @@ func validateInstanceUsesPrivateIP(t *testing.T, testRegion string, workingDir s
 
 	// Assert on a private IP being associated to the instance
 	assert.NotEmpty(t, instanceResponseData.PrivateIpAddress)
+}
+
+func validateInstanceIAMProfile(t *testing.T, workingDir string) {
+
 }
 
 func undeployUsingTerraform(t *testing.T, workingDir string) {
