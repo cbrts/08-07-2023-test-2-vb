@@ -6,7 +6,17 @@ variable "instance_type" {
 }
 
 variable "private_subnet_id" {
-  description = "Private subnet id to deploy to"
+  description = "Private subnet ID to deploy instance to"
+  type        = string
+}
+
+variable "public_subnet_ids" {
+  description = "At least two public subnet IDs to deploy the loadbalancer"
+  type        = list(string)
+}
+
+variable "vpc_id" {
+  description = "VPC to create the security groups in"
   type        = string
 }
 

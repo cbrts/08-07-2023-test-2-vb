@@ -12,9 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
 
-	// grunt_aws "github.com/gruntwork-io/terratest/modules/aws"
 	http_helper "github.com/gruntwork-io/terratest/modules/http-helper"
-	"github.com/gruntwork-io/terratest/modules/random"
 	"github.com/gruntwork-io/terratest/modules/terraform"
 	test_structure "github.com/gruntwork-io/terratest/modules/test-structure"
 	"github.com/stretchr/testify/assert"
@@ -25,13 +23,14 @@ var ec2svc = ec2.New(session.New(&aws.Config{
 	Region: aws.String("eu-west-1"),
 }))
 
-// Generate a unique ID for the state file
-var uniqueId = random.UniqueId()
-
-// Default to my private subnet but allow one to be passed in for other VPCs
+// Default to my network but allow details to be passed in for other VPC's
 var privateSubnetId = flag.String("privateSubnetId", "subnet-0cdaf467e3b2e0ea6", "Private Subnet ID to deploy to")
+var publicSubnetIds = flag.String("publicSubnetIds", "[\"subnet-8e94e3c6\", \"subnet-78a70622\"]", "Public Subnet IDs for the load balancer in array format")
+var vpcID = flag.String("vpcID", "vpc-d9517bbf", "VPC ID to deploy to")
+
+// Default to my bucket but allow other buckets to be used for test state
 var backendBucket = flag.String("backendBucket", "cb-infra-states", "Backend S3 bucket to store teststate")
-var backendBucketKey = flag.String("backendBucketKey", fmt.Sprintf("test-states/%s-terraform.tfstate", uniqueId), "Key for test state location")
+var backendBucketKey = flag.String("backendBucketKey", "test-states/local-terraform.tfstate", "Key for test state location")
 var backendBucketRegion = flag.String("backendBucketRegion", "eu-west-1", "The S3 Bucket region")
 
 func TestNginxInstance(t *testing.T) {
@@ -51,9 +50,12 @@ func TestNginxInstance(t *testing.T) {
 		deployUsingTerraform(t, testRegion, workingDir)
 	})
 
+	// Get Instance data post deployment
+	instanceData := getInstanceData(t, workingDir)
+
 	// Validate on the instance having only a private IP
 	test_structure.RunTestStage(t, "validate_on_private_ip", func() {
-		validateInstanceUsesPrivateIP(t, workingDir)
+		validateInstanceUsesPrivateIP(t, workingDir, instanceData)
 	})
 
 	// Validate on nginx being reachable and returning a 200
@@ -61,20 +63,19 @@ func TestNginxInstance(t *testing.T) {
 		validateInstanceRunningNginx(t, workingDir)
 	})
 
-	// Validate on the instance only allowing port 80
-	// test_structure.RunTestStage(t, "validate_on_ingress_80_only", func() {
-	// 	validateInstanceIngressRules(t, workingDir)
-	// })
-
 	// Validate on the instance having the correct IAM profile
-	// test_structure.RunTestStage(t, "validate_on_correct_IAM_profile", func() {
-	// 	validateInstanceIAMProfile(t, workingDir)
-	// })
+	test_structure.RunTestStage(t, "validate_on_correct_IAM_profile", func() {
+		validateInstanceIAMProfile(t, workingDir, instanceData)
+	})
+
+	// Validate on the instance only allowing port 80
+	test_structure.RunTestStage(t, "validate_on_ingress_80_only", func() {
+		validateInstanceIngressRules(t, workingDir)
+	})
 }
 
 func deployUsingTerraform(t *testing.T, testRegion string, workingDir string) {
-	// Get recommended instance type based on test region
-	// testInstanceType := grunt_aws.GetRecommendedInstanceType(t, testRegion, []string{"t2.micro, t3.micro, t2.small, t3.small"})
+	//  Set test instance Type to deploy
 	testInstanceType := "t3.micro"
 
 	// Set the Terraform directory to init as well as variables to pass in for the test.
@@ -84,6 +85,8 @@ func deployUsingTerraform(t *testing.T, testRegion string, workingDir string) {
 		Vars: map[string]interface{}{
 			"instance_type":     testInstanceType,
 			"private_subnet_id": *privateSubnetId,
+			"public_subnet_ids": *publicSubnetIds,
+			"vpc_id":            *vpcID,
 		},
 		BackendConfig: map[string]interface{}{
 			"bucket": *backendBucket,
@@ -100,29 +103,7 @@ func deployUsingTerraform(t *testing.T, testRegion string, workingDir string) {
 	terraform.InitAndApply(t, terraformOptions)
 }
 
-func validateInstanceRunningNginx(t *testing.T, workingDir string) {
-	// Load the same options used in the deploy stage
-	terraformOptions := test_structure.LoadTerraformOptions(t, workingDir)
-
-	// Fetch the generated DNS record from the ALB using `terraform output`
-	loadbalancerDNSRecord := terraform.Output(t, terraformOptions, "hello_world")
-
-	// Set the URL to verify against using the DNS record above
-	instanceUrl := fmt.Sprintf("https://%s", loadbalancerDNSRecord)
-
-	// Set up blank TLS config for use with http_helper
-	tlsConfig := tls.Config{}
-
-	// Set up retry configuration as the instance will take time to boot
-	retryLimit := 30
-	sleepBetweenRetry := 5 * time.Second
-
-	// Verify that we get a 200 when a response is sent
-	http_helper.HttpGetWithRetry(t, instanceUrl, &tlsConfig, 200, "", retryLimit, sleepBetweenRetry)
-}
-
-func validateInstanceUsesPrivateIP(t *testing.T, workingDir string) {
-	// Load the same options used in the deploy stage
+func getInstanceData(t *testing.T, workingDir string) *ec2.DescribeInstancesOutput {
 	terraformOptions := test_structure.LoadTerraformOptions(t, workingDir)
 
 	// Fetch the target instanceID using `terraform output`
@@ -141,40 +122,100 @@ func validateInstanceUsesPrivateIP(t *testing.T, workingDir string) {
 	// Error if the SDK can't return results
 	resp, err := ec2svc.DescribeInstances(params)
 	if err != nil {
-		fmt.Println("there was an error listing instances in", err.Error())
+		fmt.Println("there was an error listing instances", err.Error())
 		log.Fatal(err.Error())
 	}
 
-	// Grab the NetworkInterface data for the instance
-	instanceResponseData := *resp.Reservations[0].Instances[0].NetworkInterfaces[0]
-
-	// Assert on a private IP being associated to the instance
-	assert.NotEmpty(t, instanceResponseData.PrivateIpAddress)
+	// Return data to use in other tests
+	return resp
 }
 
-// func validateInstanceIAMProfile(t *testing.T, workingDir string) {
-// 	// Load the same options used in the deploy stage
-// 	terraformOptions := test_structure.LoadTerraformOptions(t, workingDir)
+func customValidation(status int, _ string) bool {
+	return status == 200
+}
 
-// 	// Fetch the target instanceID using `terraform output`
-// 	instanceId := terraform.Output(t, terraformOptions, "instance_id")
+func validateInstanceRunningNginx(t *testing.T, workingDir string) {
+	// Load the same options used in the deploy stage
+	terraformOptions := test_structure.LoadTerraformOptions(t, workingDir)
 
-// 	params := &ec2.DescribeInstancesInput{
-// 		Filters: []*ec2.Filter{
-// 			{
-// 				Name:   aws.String("instance-id"),
-// 				Values: []*string{aws.String(instanceId)},
-// 			},
-// 		},
-// 	}
+	// Fetch the generated DNS record from the ALB using `terraform output`
+	loadbalancerDNSRecord := terraform.Output(t, terraformOptions, "load_balancer_dns_record")
 
-// 	// Error if the SDK can't return results
-// 	resp, err := ec2svc.DescribeInstances(params)
-// 	if err != nil {
-// 		fmt.Println("there was an error listing instances in", err.Error())
-// 		log.Fatal(err.Error())
-// 	}
-// }
+	// Set the URL to verify against using the DNS record above
+	instanceURL := fmt.Sprintf("http://%s", loadbalancerDNSRecord)
+
+	// Set up blank TLS config for use with http_helper
+	tlsConfig := tls.Config{}
+
+	// Set up retry configuration as the instance will take time to boot
+	retryLimit := 30
+	sleepBetweenRetry := 5 * time.Second
+
+	// Assert on if the request to the load balancer returns a 200 status code
+	http_helper.HttpGetWithRetryWithCustomValidation(t, instanceURL, &tlsConfig, retryLimit, sleepBetweenRetry, customValidation)
+}
+
+func validateInstanceUsesPrivateIP(t *testing.T, workingDir string, instanceData *ec2.DescribeInstancesOutput) {
+	// Fetch the NetworkInterface data for the instance
+	networkInterface := instanceData.Reservations[0].Instances[0].NetworkInterfaces[0]
+
+	// Assert on a private IP being associated to the instance
+	assert.NotEmpty(t, networkInterface.PrivateIpAddress)
+}
+
+func validateInstanceIAMProfile(t *testing.T, workingDir string, instanceData *ec2.DescribeInstancesOutput) {
+	// Fetch the target IAM Instance profile data for the instance
+	actualIAMInstanceProfile := instanceData.Reservations[0].Instances[0].IamInstanceProfile.Arn
+
+	// Load the same options used in the deploy stage
+	terraformOptions := test_structure.LoadTerraformOptions(t, workingDir)
+
+	// Fetch the target IAM instance profile using `terraform output`
+	expectedIAMInstanceProfile := terraform.Output(t, terraformOptions, "iam_instance_profile_arn")
+
+	// Assert on the value being the same as the output
+	assert.Equal(t, expectedIAMInstanceProfile, *actualIAMInstanceProfile)
+}
+
+func validateInstanceIngressRules(t *testing.T, workingDir string) {
+	terraformOptions := test_structure.LoadTerraformOptions(t, workingDir)
+
+	// Fetch the target security Group IDs using `terraform output`
+	albGroupID := terraform.Output(t, terraformOptions, "alb_sg_group_id")
+	instanceGroupID := terraform.Output(t, terraformOptions, "instance_sg_group_id")
+
+	// Fetch the ALB security group from the SDK
+	albGroupParams := &ec2.DescribeSecurityGroupsInput{
+		GroupIds: aws.StringSlice([]string{albGroupID}),
+	}
+
+	// Fetch the instance security group from the SDK
+	instanceGroupParams := &ec2.DescribeSecurityGroupsInput{
+		GroupIds: aws.StringSlice([]string{instanceGroupID}),
+	}
+
+	// Error if the SDK can't return results
+	albResp, err := ec2svc.DescribeSecurityGroups(albGroupParams)
+	if err != nil {
+		fmt.Println("there was an error listing security groups", err.Error())
+		log.Fatal(err.Error())
+	}
+	instanceResp, err := ec2svc.DescribeSecurityGroups(instanceGroupParams)
+	if err != nil {
+		fmt.Println("there was an error listing security groups", err.Error())
+		log.Fatal(err.Error())
+	}
+
+	// Assert that the alb accepts traffic on port 80 from the internet
+	assert.Equal(t, int64(80), *albResp.SecurityGroups[0].IpPermissions[0].FromPort)
+	assert.Equal(t, int64(80), *albResp.SecurityGroups[0].IpPermissions[0].ToPort)
+	assert.Equal(t, "0.0.0.0/0", *albResp.SecurityGroups[0].IpPermissions[0].IpRanges[0].CidrIp)
+
+	// Assert that the instance accepts trafficon port 80 from ALB with a SG whitelist
+	assert.Equal(t, int64(80), *instanceResp.SecurityGroups[0].IpPermissions[0].FromPort)
+	assert.Equal(t, int64(80), *instanceResp.SecurityGroups[0].IpPermissions[0].ToPort)
+	assert.NotEmpty(t, *instanceResp.SecurityGroups[0].IpPermissions[0].UserIdGroupPairs[0].GroupId)
+}
 
 func undeployUsingTerraform(t *testing.T, workingDir string) {
 	// Load the same options used in the deploy stage

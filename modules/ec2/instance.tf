@@ -17,8 +17,9 @@ data "aws_subnet" "this" {
   id = var.private_subnet_id
 }
 
-resource "random_id" "this" {
-  byte_length = 4
+resource "random_string" "this" {
+  length  = 6
+  special = false
 }
 
 resource "aws_instance" "this" {
@@ -26,9 +27,10 @@ resource "aws_instance" "this" {
   instance_type        = var.instance_type
   subnet_id            = var.private_subnet_id
   iam_instance_profile = aws_iam_instance_profile.this.id
+  security_groups      = [aws_security_group.allow_http_from_alb.id]
   tags = merge(
     {
-      "Name" = format("ec2-%s-%s-%s-%s-%s", data.aws_region.current.name, data.aws_subnet.this.availability_zone, var.environment_name, var.product_name, random_id.this.id)
+      "Name" = format("ec2-%s", local.regional_name)
     },
     module.tags.tags
   )

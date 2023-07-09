@@ -3,6 +3,8 @@ module "nginx_instance" {
 
   instance_type     = "t3.micro"
   private_subnet_id = var.private_subnet_id
+  public_subnet_ids = var.public_subnet_ids
+  vpc_id            = var.vpc_id
   environment_name  = "Dev"
   squad_name        = "SquadA"
   contact_email     = "SquadA@acme.com"
