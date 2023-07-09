@@ -36,11 +36,11 @@ var backendBucketRegion = flag.String("backendBucketRegion", "eu-west-1", "The S
 func TestNginxInstance(t *testing.T) {
 	t.Parallel()
 
-	// Set directory for test fixture and test region.
+	// Set directory for test fixture and test region
 	workingDir := "../examples/ec2_nginx"
 	testRegion := "eu-west-1"
 
-	// At the end of the test, destroy all test resources.
+	// At the end of the test, destroy all test resources
 	defer test_structure.RunTestStage(t, "cleanup_terraform", func() {
 		undeployUsingTerraform(t, workingDir)
 	})
@@ -53,7 +53,7 @@ func TestNginxInstance(t *testing.T) {
 	// Get Instance data post deployment
 	instanceData := getInstanceData(t, workingDir)
 
-	// Validate on the instance having only a private IP
+	// Validate on the instance having a private IP only
 	test_structure.RunTestStage(t, "validate_on_private_ip", func() {
 		validateInstanceUsesPrivateIP(t, workingDir, instanceData)
 	})
@@ -75,10 +75,10 @@ func TestNginxInstance(t *testing.T) {
 }
 
 func deployUsingTerraform(t *testing.T, testRegion string, workingDir string) {
-	//  Set test instance Type to deploy
+	//  Set test instance type to be deployed
 	testInstanceType := "t3.micro"
 
-	// Set the Terraform directory to init as well as variables to pass in for the test.
+	// Set the Terraform directory to init as well as variables to pass in for the test
 	terraformOptions := terraform.WithDefaultRetryableErrors(t, &terraform.Options{
 		TerraformDir: workingDir,
 
@@ -104,12 +104,13 @@ func deployUsingTerraform(t *testing.T, testRegion string, workingDir string) {
 }
 
 func getInstanceData(t *testing.T, workingDir string) *ec2.DescribeInstancesOutput {
+	// Load the same options used in the deploy stage
 	terraformOptions := test_structure.LoadTerraformOptions(t, workingDir)
 
 	// Fetch the target instanceID using `terraform output`
 	instanceId := terraform.Output(t, terraformOptions, "instance_id")
 
-	// Fetch the privateIP to assert on from the SDK
+	// Fetch the private IP to assert on from the SDK
 	params := &ec2.DescribeInstancesInput{
 		Filters: []*ec2.Filter{
 			{
@@ -141,7 +142,7 @@ func validateInstanceRunningNginx(t *testing.T, workingDir string) {
 	// Fetch the generated DNS record from the ALB using `terraform output`
 	loadbalancerDNSRecord := terraform.Output(t, terraformOptions, "load_balancer_dns_record")
 
-	// Set the URL to verify against using the DNS record above
+	// Set the URL to verify against using the DNS record
 	instanceURL := fmt.Sprintf("http://%s", loadbalancerDNSRecord)
 
 	// Set up blank TLS config for use with http_helper
@@ -164,13 +165,13 @@ func validateInstanceUsesPrivateIP(t *testing.T, workingDir string, instanceData
 }
 
 func validateInstanceIAMProfile(t *testing.T, workingDir string, instanceData *ec2.DescribeInstancesOutput) {
-	// Fetch the target IAM Instance profile data for the instance
+	// Fetch the actual IAM Instance profile data for the instance
 	actualIAMInstanceProfile := instanceData.Reservations[0].Instances[0].IamInstanceProfile.Arn
 
 	// Load the same options used in the deploy stage
 	terraformOptions := test_structure.LoadTerraformOptions(t, workingDir)
 
-	// Fetch the target IAM instance profile using `terraform output`
+	// Fetch the expected IAM instance profile using `terraform output`
 	expectedIAMInstanceProfile := terraform.Output(t, terraformOptions, "iam_instance_profile_arn")
 
 	// Assert on the value being the same as the output
@@ -180,7 +181,7 @@ func validateInstanceIAMProfile(t *testing.T, workingDir string, instanceData *e
 func validateInstanceIngressRules(t *testing.T, workingDir string) {
 	terraformOptions := test_structure.LoadTerraformOptions(t, workingDir)
 
-	// Fetch the target security Group IDs using `terraform output`
+	// Fetch the target security Group ID's using `terraform output`
 	albGroupID := terraform.Output(t, terraformOptions, "alb_sg_group_id")
 	instanceGroupID := terraform.Output(t, terraformOptions, "instance_sg_group_id")
 
@@ -206,12 +207,12 @@ func validateInstanceIngressRules(t *testing.T, workingDir string) {
 		log.Fatal(err.Error())
 	}
 
-	// Assert that the alb accepts traffic on port 80 from the internet
+	// Assert that the ALB accepts traffic on port 80 from the internet
 	assert.Equal(t, int64(80), *albResp.SecurityGroups[0].IpPermissions[0].FromPort)
 	assert.Equal(t, int64(80), *albResp.SecurityGroups[0].IpPermissions[0].ToPort)
 	assert.Equal(t, "0.0.0.0/0", *albResp.SecurityGroups[0].IpPermissions[0].IpRanges[0].CidrIp)
 
-	// Assert that the instance accepts trafficon port 80 from ALB with a SG whitelist
+	// Assert that the instance accepts traffic on port 80 from THE ALB with a SG whitelist
 	assert.Equal(t, int64(80), *instanceResp.SecurityGroups[0].IpPermissions[0].FromPort)
 	assert.Equal(t, int64(80), *instanceResp.SecurityGroups[0].IpPermissions[0].ToPort)
 	assert.NotEmpty(t, *instanceResp.SecurityGroups[0].IpPermissions[0].UserIdGroupPairs[0].GroupId)
