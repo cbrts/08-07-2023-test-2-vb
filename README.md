@@ -8,7 +8,7 @@ A terraform module for a take home interview task.
 * Ensures the instance uses a private IP.
 * Restricts Ingress to port 80 only
 * Attaches an IAM instance profile for SSM sessions and `s3:List*`
-* Asks the user for relevant deployment paramters
+* Asks the user for relevant deployment parameters
 * Uses a relevant tagging and naming standard
 
 ## Assumptions

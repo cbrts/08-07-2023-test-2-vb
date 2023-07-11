@@ -27,7 +27,7 @@ resource "aws_security_group" "allow_http_from_internet" {
   vpc_id      = var.vpc_id
 
   ingress {
-    description      = "http form the internet"
+    description      = "http from the internet"
     from_port        = 80
     to_port          = 80
     protocol         = "tcp"
